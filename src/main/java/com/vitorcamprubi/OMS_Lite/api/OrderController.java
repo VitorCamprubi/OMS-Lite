@@ -1,10 +1,10 @@
 package com.vitorcamprubi.OMS_Lite.api;
 
 import com.vitorcamprubi.OMS_Lite.domain.Order;
+import com.vitorcamprubi.OMS_Lite.dto.order.CreateOrderRequest;
 import com.vitorcamprubi.OMS_Lite.service.OrderService;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
 
 @RestController
 @RequestMapping("/api/orders")
@@ -16,36 +16,8 @@ public class OrderController {
         this.orderService = orderService;
     }
 
-    // DTO do corpo da requisição
-    public static class CreateOrderRequest {
-        private Long customerId;
-        private List<OrderService.ItemRequest> items;
-
-        public CreateOrderRequest() {
-        }
-
-        public Long getCustomerId() {
-            return customerId;
-        }
-
-        public void setCustomerId(Long customerId) {
-            this.customerId = customerId;
-        }
-
-        public List<OrderService.ItemRequest> getItems() {
-            return items;
-        }
-
-        public void setItems(List<OrderService.ItemRequest> items) {
-            this.items = items;
-        }
-    }
-
     @PostMapping
-    public Order create(@RequestBody CreateOrderRequest request) {
-        return orderService.createConfirmedOrder(
-                request.getCustomerId(),
-                request.getItems()
-        );
+    public Order create(@Valid @RequestBody CreateOrderRequest request) {
+        return orderService.createConfirmedOrder(request.customerId(), request.items());
     }
 }

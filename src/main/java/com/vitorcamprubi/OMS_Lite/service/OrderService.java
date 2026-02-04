@@ -4,6 +4,7 @@ import com.vitorcamprubi.OMS_Lite.domain.Order;
 import com.vitorcamprubi.OMS_Lite.domain.OrderItem;
 import com.vitorcamprubi.OMS_Lite.domain.OrderStatus;
 import com.vitorcamprubi.OMS_Lite.domain.Product;
+import com.vitorcamprubi.OMS_Lite.dto.order.CreateOrderRequest;
 import com.vitorcamprubi.OMS_Lite.repository.CustomerRepository;
 import com.vitorcamprubi.OMS_Lite.repository.OrderRepository;
 import com.vitorcamprubi.OMS_Lite.repository.ProductRepository;
@@ -12,7 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class OrderService {
@@ -29,91 +31,89 @@ public class OrderService {
         this.productRepository = productRepository;
     }
 
-    // Classe simples para representar um item do pedido
-    public static class ItemRequest {
-        private Long productId;
-        private Integer quantity;
-
-        public ItemRequest() {
-        }
-
-        public ItemRequest(Long productId, Integer quantity) {
-            this.productId = productId;
-            this.quantity = quantity;
-        }
-
-        public Long getProductId() {
-            return productId;
-        }
-
-        public void setProductId(Long productId) {
-            this.productId = productId;
-        }
-
-        public Integer getQuantity() {
-            return quantity;
-        }
-
-        public void setQuantity(Integer quantity) {
-            this.quantity = quantity;
-        }
-    }
-
     @Transactional
-    public Order createConfirmedOrder(Long customerId, List<ItemRequest> itemsRequest) {
+    public Order createConfirmedOrder(Long customerId, List<CreateOrderRequest.ItemRequest> itemsRequest) {
 
-        // 1. Buscar o cliente
+        // Regra de negócio: pedido precisa ter pelo menos 1 item
+        if (itemsRequest == null || itemsRequest.isEmpty()) {
+            throw new IllegalArgumentException("Pedido deve conter ao menos 1 item.");
+        }
+
+        // 1) Buscar cliente
         var customer = customerRepository.findById(customerId)
                 .orElseThrow(() -> new RuntimeException("Cliente não encontrado"));
 
-        // 2. Criar o pedido em memória
+        // 2) Consolidar itens duplicados (mesmo productId repetido)
+        // Ex: [{id=1,q=2},{id=1,q=3}] => {1 => 5}
+        Map<Long, Integer> qtyByProductId = new LinkedHashMap<>();
+        for (CreateOrderRequest.ItemRequest req : itemsRequest) {
+            if (req == null || req.productId() == null || req.quantity() == null) {
+                throw new IllegalArgumentException("Item inválido no pedido.");
+            }
+            qtyByProductId.merge(req.productId(), req.quantity(), Integer::sum);
+        }
+
+        // 3) Buscar todos os produtos em lote
+        List<Long> productIds = new ArrayList<>(qtyByProductId.keySet());
+        List<Product> products = new ArrayList<>();
+        productRepository.findAllById(productIds).forEach(products::add);
+
+        Map<Long, Product> productMap = products.stream()
+                .collect(Collectors.toMap(Product::getId, p -> p));
+
+        // 4) Validar se todos os productsId existem
+        for (Long productId : productIds) {
+            if (!productMap.containsKey(productId)) {
+                throw new RuntimeException("Produto não encontrado: " + productId);
+            }
+        }
+
+        // 5) Criar pedido em memória
         var order = new Order();
         order.setCustomer(customer);
         order.setCreatedAt(LocalDateTime.now());
         order.setStatus(OrderStatus.CONFIRMED);
         order.setTotalAmount(BigDecimal.ZERO);
 
-        // 3. Vamos calcular o total aos poucos
         BigDecimal total = BigDecimal.ZERO;
 
-        for (ItemRequest req : itemsRequest) {
+        // 6) Validar estoque, baixar e criar itens
+        for (Map.Entry<Long, Integer> entry : qtyByProductId.entrySet()) {
+            Long productId = entry.getKey();
+            Integer quantity = entry.getValue();
 
-            // 4. Buscar o produto
-            Product product = productRepository.findById(req.getProductId())
-                    .orElseThrow(() ->
-                            new RuntimeException("Produto não encontrado: " + req.getProductId()));
+            Product product = productMap.get(productId);
 
-            // 5. Verificar estoque
-            if (product.getStockQuantity() < req.getQuantity()) {
-                throw new RuntimeException(
-                        "Estoque insuficiente para o produto id " + product.getId()
-                );
+            Integer stock = product.getStockQuantity();
+            if (stock == null) stock = 0;
+
+            if (stock < quantity) {
+                throw new RuntimeException("Estoque insuficiente para o produto id " + product.getId());
             }
 
-            // 6. Baixar estoque
-            product.setStockQuantity(product.getStockQuantity() - req.getQuantity());
+            // baixa estoque
+            product.setStockQuantity(stock - quantity);
 
-            // 7. Calcular total da linha
-            BigDecimal lineTotal = product.getUnitPrice()
-                    .multiply(BigDecimal.valueOf(req.getQuantity()));
+            // calcula total da linha
+            BigDecimal unitPrice = product.getUnitPrice();
+            BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(quantity));
 
-            // 8. Criar OrderItem e associar ao pedido
+            // cria OrderItem
             OrderItem orderItem = new OrderItem();
             orderItem.setProduct(product);
-            orderItem.setQuantity(req.getQuantity());
-            orderItem.setUnitPrice(product.getUnitPrice());
+            orderItem.setQuantity(quantity);
+            orderItem.setUnitPrice(unitPrice);
             orderItem.setTotalPrice(lineTotal);
 
             order.addItem(orderItem);
 
-            // 9. Somar no total geral
             total = total.add(lineTotal);
         }
 
-        // 10. Seta o total calculado
+        // 7) Total geral
         order.setTotalAmount(total);
 
-        // 11. Salva o pedido (pedido + itens, por causa do cascade)
+        // 8) Salvar (cascade salva itens)
         return orderRepository.save(order);
     }
 }
