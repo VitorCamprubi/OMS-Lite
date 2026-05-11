@@ -1,0 +1,44 @@
+# =============================================================================
+# OMS-Lite — docker compose up
+# Brings up MySQL + the Spring Boot application.
+# =============================================================================
+
+services:
+  mysql:
+    image: mysql:8.0.36
+    container_name: oms-lite-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpw}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-oms_lite}
+      MYSQL_USER: ${MYSQL_USER:-oms}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-omspw}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      # mysqladmin ping returns 0 once MySQL is accepting connections
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oms-lite-app
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-oms_lite}?useSSL=false&serverTimezone=America/Sao_Paulo&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-oms}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-omspw}
+    ports:
+      - "8080:8080"
+
+volumes:
+  mysql_data:
