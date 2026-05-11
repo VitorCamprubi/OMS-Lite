@@ -5,6 +5,8 @@ import com.vitorcamprubi.OMS_Lite.domain.OrderItem;
 import com.vitorcamprubi.OMS_Lite.domain.OrderStatus;
 import com.vitorcamprubi.OMS_Lite.domain.Product;
 import com.vitorcamprubi.OMS_Lite.dto.order.CreateOrderRequest;
+import com.vitorcamprubi.OMS_Lite.exception.BusinessRuleException;
+import com.vitorcamprubi.OMS_Lite.exception.ResourceNotFoundException;
 import com.vitorcamprubi.OMS_Lite.repository.CustomerRepository;
 import com.vitorcamprubi.OMS_Lite.repository.OrderRepository;
 import com.vitorcamprubi.OMS_Lite.repository.ProductRepository;
@@ -13,7 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,12 +41,12 @@ public class OrderService {
 
         // Regra de negócio: pedido precisa ter pelo menos 1 item
         if (itemsRequest == null || itemsRequest.isEmpty()) {
-            throw new IllegalArgumentException("Pedido deve conter ao menos 1 item.");
+            throw BusinessRuleException.emptyOrder();
         }
 
         // 1) Buscar cliente
         var customer = customerRepository.findById(customerId)
-                .orElseThrow(() -> new RuntimeException("Cliente não encontrado"));
+                .orElseThrow(() -> ResourceNotFoundException.customer(customerId));
 
         // 2) Consolidar itens duplicados (mesmo productId repetido)
         // Ex: [{id=1,q=2},{id=1,q=3}] => {1 => 5}
@@ -61,10 +66,10 @@ public class OrderService {
         Map<Long, Product> productMap = products.stream()
                 .collect(Collectors.toMap(Product::getId, p -> p));
 
-        // 4) Validar se todos os productsId existem
+        // 4) Validar se todos os productIds existem
         for (Long productId : productIds) {
             if (!productMap.containsKey(productId)) {
-                throw new RuntimeException("Produto não encontrado: " + productId);
+                throw ResourceNotFoundException.product(productId);
             }
         }
 
@@ -88,7 +93,7 @@ public class OrderService {
             if (stock == null) stock = 0;
 
             if (stock < quantity) {
-                throw new RuntimeException("Estoque insuficiente para o produto id " + product.getId());
+                throw BusinessRuleException.insufficientStock(product.getId(), quantity, stock);
             }
 
             // baixa estoque
@@ -115,5 +120,11 @@ public class OrderService {
 
         // 8) Salvar (cascade salva itens)
         return orderRepository.save(order);
+    }
+
+    @Transactional(readOnly = true)
+    public Order findById(Long id) {
+        return orderRepository.findById(id)
+                .orElseThrow(() -> ResourceNotFoundException.order(id));
     }
 }

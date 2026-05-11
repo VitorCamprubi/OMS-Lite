@@ -1,28 +1,40 @@
 package com.vitorcamprubi.OMS_Lite.api;
 
 import com.vitorcamprubi.OMS_Lite.domain.Product;
-import com.vitorcamprubi.OMS_Lite.repository.ProductRepository;
+import com.vitorcamprubi.OMS_Lite.dto.product.CreateProductRequest;
+import com.vitorcamprubi.OMS_Lite.service.ProductService;
+import jakarta.validation.Valid;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URI;
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/products")
 public class ProductController {
 
-    private final ProductRepository productRepository;
+    private final ProductService productService;
 
-    public ProductController(ProductRepository productRepository) {
-        this.productRepository = productRepository;
+    public ProductController(ProductService productService) {
+        this.productService = productService;
     }
 
     @PostMapping
-    public Product save(@RequestBody Product product) {
-        return productRepository.save(product);
+    public ResponseEntity<Product> create(@Valid @RequestBody CreateProductRequest request) {
+        Product saved = productService.create(request);
+        return ResponseEntity
+                .created(URI.create("/api/products/" + saved.getId()))
+                .body(saved);
     }
 
     @GetMapping
     public List<Product> findAll() {
-        return  productRepository.findAll();
+        return productService.findAll();
+    }
+
+    @GetMapping("/{id}")
+    public Product findById(@PathVariable Long id) {
+        return productService.findById(id);
     }
 }
