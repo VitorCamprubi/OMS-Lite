@@ -1,398 +1,367 @@
 # OMS-Lite
 
-Pequeno **Order Management System (OMS)** para estudo de backend Java, usando **Spring Boot 4 + Java 24 + MySQL**.
-
-A ideia é ter uma API simples, mas com conceitos de “mundo real”:
-
-- Cadastro de **clientes** e **produtos**
-- Criação de **pedidos** com **itens**, total calculado e baixa de estoque
-- Organização em **camadas** (controller, service, repository, domain)
-- Uso de **JPA/Hibernate** e **MySQL** com `spring-boot-starter-data-jpa`
-
----
-
-## 🧠 Objetivo do projeto
-
-O OMS-Lite foi criado para:
-
-- Praticar **Java / Spring Boot** com foco em backend
-- Simular um fluxo básico de **pedido de venda**
-- Servir como projeto de **portfólio** para vagas de desenvolvedor Java backend
-
-Não é um sistema pronto para produção, e sim uma base didática para evoluir.
+Mini **Order Management System** em Java + Spring Boot 4. Expõe uma API REST
+para cadastrar clientes e produtos e criar pedidos com baixa de estoque
+transacional. Projeto de portfólio focado em mostrar uma stack backend Java
+realista — não é production-ready, mas as práticas (migrations versionadas,
+testes de integração contra MySQL real, exception handler global,
+documentação OpenAPI, CI no GitHub Actions) seguem o que se espera num
+serviço de verdade.
 
 ---
 
-## 🛠 Stack utilizada
+## Problema modelado
 
-- **Linguagem:** Java 24
-- **Framework:** Spring Boot 4.0.1
-  - spring-boot-starter-web  
-  - spring-boot-starter-data-jpa  
-  - spring-boot-starter-validation
-- **Banco de dados:** MySQL 8.0.x
-- **Pool de conexões:** HikariCP
-- **ORM:** Hibernate 7.2
-- **Build:** Maven
-- **IDE:** IntelliJ IDEA
+Um OMS típico precisa:
 
----
+- **Manter o catálogo** — produtos com SKU único, preço, estoque.
+- **Manter clientes** — identificação por e-mail e documento (CPF/CNPJ), ambos únicos.
+- **Confirmar pedidos** — receber `customerId` + lista de itens, validar tudo,
+  baixar o estoque dos produtos e gravar o pedido com `totalAmount` calculado.
+  Tudo numa única transação.
 
-## ✅ Funcionalidades atuais
-
-### Produtos
-
-- [x] Cadastrar produto
-- [x] Listar todos os produtos
-- [x] Campos:
-  - `id`
-  - `name`
-  - `sku`
-  - `unitPrice`
-  - `stockQuantity`
-
-### Clientes
-
-- [x] Cadastrar cliente
-- [x] Listar clientes
-- [x] Campos:
-  - `id`
-  - `name`
-  - `document` (CPF/CNPJ)
-  - `email`
-
-### Pedidos
-
-- [x] Criar pedido confirmado para um cliente
-- [x] Adicionar múltiplos itens
-- [x] Calcular total automaticamente
-- [x] Baixar estoque dos produtos
-- [x] Status do pedido:
-  - `CONFIRMED`
-  - `CANCELLED` (já previsto no enum para uso futuro)
+OMS-Lite é a versão mínima desse ciclo. Não há autenticação, fluxo de
+pagamento, cancelamento, expedição, etc. — escopo intencionalmente curto.
 
 ---
 
-## 🧩 Modelagem de domínio (resumida)
+## Stack
 
-Entidades principais:
-
-- **Customer**
-- **Product**
-- **Order**
-- **OrderItem**
-- **OrderStatus** (enum: `CONFIRMED`, `CANCELLED`)
-
-Relações:
-
-- `Customer 1:N Order`
-- `Order 1:N OrderItem`
-- `Product 1:N OrderItem`
+| Camada            | Tecnologia                                    |
+|-------------------|-----------------------------------------------|
+| Linguagem         | Java 21                                       |
+| Framework         | Spring Boot 4.0.1 (`spring-boot-starter-webmvc`) |
+| Persistência      | Spring Data JPA / Hibernate 7                 |
+| Banco             | MySQL 8                                       |
+| Migrations        | Flyway (`flyway-core` + `flyway-mysql`)       |
+| Validação         | Bean Validation (Jakarta)                     |
+| Documentação API  | Springdoc OpenAPI + Swagger UI                |
+| Testes unitários  | JUnit 5 + Mockito + AssertJ                   |
+| Testes de integração | Testcontainers (MySQL real, sem H2)        |
+| Build             | Maven                                         |
+| Container         | Dockerfile multi-stage + docker compose       |
+| CI                | GitHub Actions (`mvn verify`)                 |
 
 ---
 
-## 🚀 Como rodar o projeto
+## Arquitetura
 
-### 1. Pré-requisitos
+```mermaid
+flowchart LR
+    Client[Cliente HTTP] -->|JSON| Controller
 
-- Java 24 instalado (`java -version`)
-- Maven instalado (`mvn -version`)
-- MySQL 8 rodando localmente
+    subgraph App[Spring Boot Application]
+        Controller["api/<br/>CustomerController<br/>ProductController<br/>OrderController"]
+        Service["service/<br/>CustomerService<br/>ProductService<br/>OrderService"]
+        Repo["repository/<br/>JpaRepository"]
+        Domain["domain/<br/>Customer · Product<br/>Order · OrderItem"]
+        Handler["exception/<br/>GlobalExceptionHandler"]
 
-### 2. Criar banco de dados
+        Controller -->|@Valid DTO| Service
+        Service -->|persiste/lê| Repo
+        Repo -->|JPA| Domain
+        Controller -. exceptions .-> Handler
+        Service -. exceptions .-> Handler
+    end
 
-No MySQL:
-
-```sql
-CREATE DATABASE oms_lite CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-````
-
-### 3. Configurar credenciais do banco
-
-No arquivo `src/main/resources/application.properties`:
-
-```properties
-spring.datasource.url=jdbc:mysql://localhost:3306/oms_lite?useSSL=false&serverTimezone=America/Sao_Paulo
-spring.datasource.username=SEU_USUARIO
-spring.datasource.password=SUA_SENHA
-
-spring.jpa.hibernate.ddl-auto=update
-spring.jpa.show-sql=true
-spring.jpa.properties.hibernate.format_sql=true
+    Repo -->|JDBC| MySQL[(MySQL 8)]
+    Flyway[Flyway migrations<br/>db/migration/V*.sql] -->|aplica no startup| MySQL
 ```
 
-Ajuste `username` e `password` para o seu ambiente.
+**Fluxo de criação de pedido** (`POST /api/orders`):
 
-### 4. Rodar a aplicação
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant Ctrl as OrderController
+    participant Svc as OrderService
+    participant Cust as CustomerRepository
+    participant Prod as ProductRepository
+    participant Ord as OrderRepository
 
-Via Maven:
+    C->>Ctrl: POST /api/orders {customerId, items[]}
+    Ctrl->>Ctrl: @Valid (NotEmpty, Positive...)
+    Ctrl->>Svc: createConfirmedOrder(...)
+    Note over Svc: @Transactional begin
+    Svc->>Cust: findById(customerId)
+    Cust-->>Svc: Customer | empty → 404
+    Svc->>Svc: consolida itens duplicados
+    Svc->>Prod: findAllById(productIds)
+    Prod-->>Svc: List<Product>
+    Svc->>Svc: valida existência e estoque
+    Svc->>Svc: baixa estoque + calcula totais
+    Svc->>Ord: save(order) (cascade salva itens)
+    Note over Svc: @Transactional commit
+    Svc-->>Ctrl: Order persistido
+    Ctrl-->>C: 201 Created + Location header
+```
+
+---
+
+## Decisões técnicas e trade-offs
+
+**Service layer concentra regra de negócio, controller é "burro".**
+Validação Bean é feita no controller via `@Valid`; regras (estoque, unicidade
+de SKU/e-mail, transações) ficam no service. Trade-off: para um CRUD trivial
+isso é overhead — mas `OrderService.createConfirmedOrder` justifica a camada
+sozinho, e padronizar os outros recursos no mesmo formato evita o controller
+inchar quando a complexidade chegar.
+
+**Entidades JPA expostas direto na resposta HTTP, sem DTO de saída.**
+Mantém o projeto enxuto; a desvantagem é acoplar contrato público da API à
+modelagem do banco. Quando esse contrato precisar evoluir sem mexer no
+schema, troca-se por response DTOs. Por ora, `@JsonIgnore` em
+`OrderItem.order` evita o ciclo de serialização — solução simples, suficiente
+para o escopo.
+
+**Unicidade verificada no service via `existsBy*` + constraint no banco.**
+Há janela de race condition (dois requests simultâneos podem passar pelo
+`existsByEmail` antes de qualquer um persistir). Backstop: `UNIQUE` no
+schema. Em concorrência alta, vale tratar `DataIntegrityViolationException`
+explicitamente — o `GlobalExceptionHandler` já mapeia para 409.
+
+**`OrderService` consolida `productId` duplicado no payload (`Map.merge` por
+soma).** Ex.: `[{id=1,q=2},{id=1,q=3}]` vira `{id=1,q=5}`. Decisão de UX —
+clientes que enviam o mesmo produto em itens separados não vão receber 400
+nem dois `OrderItem` distintos. Trade-off: esconde possível bug do cliente.
+Justificável porque o resultado final no banco é o mesmo.
+
+**`totalAmount` armazenado, não computado on-read.** Denormalização
+consciente: evita JOIN agregando `order_items` em cada listagem de pedido.
+Risco é divergir se alguém alterar `order_items` por fora do `OrderService`
+— não é possível hoje porque não há endpoint para isso.
+
+**Flyway dono do schema; Hibernate em `ddl-auto=validate`.** Migrations
+versionadas são auditáveis e reproduzíveis em qualquer ambiente. O preço é
+manter a `V1__init_schema.sql` em sincronia com as anotações JPA — `validate`
+quebra o startup se desalinhar, o que é o comportamento desejado.
+
+**Testcontainers + MySQL real em vez de H2.** H2 mente sobre comportamento
+do MySQL (collation, tipos de coluna, FK, modos de erro). Custo: cada
+classe de teste de integração paga a inicialização do container — mitigado
+por iniciar o container num bloco `static` da `AbstractMySqlContainerTest`,
+compartilhando entre suites na mesma JVM.
+
+**`spring.jpa.open-in-view=false`.** Default do Boot é `true` e isso causa
+LazyInitializationException disfarçado de "funciona em dev, quebra em
+prod" — desligar força sermos explícitos sobre o que carregar dentro da
+transação.
+
+**Spring Boot 4.0.1 é bleeding edge.** Springdoc declarado na versão
+`2.8.6`; se houver incompatibilidade com SB 4, basta bumpar a `springdoc.version`
+no `pom.xml`. Idem para `testcontainers.version`.
+
+---
+
+## Estrutura
+
+```
+src/main/java/com/vitorcamprubi/OMS_Lite
+├── api/         REST controllers
+├── service/     Regra de negócio + @Transactional
+├── repository/  JpaRepository
+├── domain/      Entidades JPA
+├── dto/         Records validados para requests
+├── exception/   Exceptions de domínio + GlobalExceptionHandler
+└── config/      OpenApiConfig
+
+src/main/resources
+├── application.properties
+└── db/migration/V1__init_schema.sql
+
+src/test/java/com/vitorcamprubi/OMS_Lite
+├── service/        Unit tests (Mockito)
+└── integration/    Testcontainers IT
+```
+
+---
+
+## Como rodar
+
+### Opção A — Com Docker (recomendado)
+
+Pré-requisito: Docker + Docker Compose.
 
 ```bash
-mvn spring-boot:run
+docker compose up --build
 ```
 
-Ou pela IDE (IntelliJ), rodando a classe:
+Sobe MySQL com healthcheck, espera o banco estar saudável, e só então
+inicia a aplicação. A API fica em `http://localhost:8080` e o Swagger UI em
+`http://localhost:8080/swagger-ui.html`.
 
-```text
-com.vitorcamprubi.OMS_Lite.OmsLiteApplication
+Para derrubar e limpar o volume do MySQL:
+
+```bash
+docker compose down -v
 ```
 
-A API sobe em:
+### Opção B — Local sem Docker
 
-```text
-http://localhost:8080
+Pré-requisitos: Java 21, Maven 3.9+, MySQL 8 rodando localmente.
+
+1. Crie o banco:
+
+   ```sql
+   CREATE DATABASE oms_lite CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   ```
+
+2. Exporte as credenciais (ou ajuste o `application.properties`):
+
+   ```bash
+   export SPRING_DATASOURCE_URL='jdbc:mysql://localhost:3306/oms_lite?useSSL=false&serverTimezone=America/Sao_Paulo&allowPublicKeyRetrieval=true'
+   export SPRING_DATASOURCE_USERNAME=root
+   export SPRING_DATASOURCE_PASSWORD=suasenha
+   ```
+
+3. Suba a aplicação:
+
+   ```bash
+   ./mvnw spring-boot:run
+   ```
+
+   Flyway aplica as migrations no primeiro start.
+
+### Rodar os testes
+
+Unit + integração (Testcontainers precisa de Docker disponível):
+
+```bash
+./mvnw verify
 ```
 
 ---
 
-## 📡 Endpoints principais
+## Endpoints
 
-### Health check
+Documentação interativa em `http://localhost:8080/swagger-ui.html`.
 
-```http
-GET /api/ping
+### Health
+
+```bash
+curl http://localhost:8080/api/ping
+# pong
 ```
 
-**Resposta:**
+### Customers
 
-```json
-"pong"
+Criar:
+
+```bash
+curl -i -X POST http://localhost:8080/api/customers \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "Joana Silva",
+    "email": "joana@example.com",
+    "document": "12345678900"
+  }'
 ```
 
----
+Listar:
 
-### Produtos
-
-#### 1. Listar produtos
-
-```http
-GET /api/products
+```bash
+curl http://localhost:8080/api/customers
 ```
 
-**Exemplo de resposta:**
+Buscar por ID:
 
-```json
-[
-  {
-    "id": 1,
+```bash
+curl http://localhost:8080/api/customers/1
+```
+
+### Products
+
+Criar:
+
+```bash
+curl -i -X POST http://localhost:8080/api/products \
+  -H 'Content-Type: application/json' \
+  -d '{
     "name": "Teclado Mecânico",
     "sku": "TEC-001",
     "unitPrice": 250.00,
     "stockQuantity": 10
-  }
-]
+  }'
 ```
 
-#### 2. Criar produto
+Listar:
 
-```http
-POST /api/products
-Content-Type: application/json
+```bash
+curl http://localhost:8080/api/products
 ```
 
-**Body:**
+### Orders
+
+Criar pedido:
+
+```bash
+curl -i -X POST http://localhost:8080/api/orders \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "customerId": 1,
+    "items": [
+      { "productId": 1, "quantity": 2 },
+      { "productId": 2, "quantity": 1 }
+    ]
+  }'
+```
+
+Resposta (201 Created), com `Location: /api/orders/{id}`:
 
 ```json
 {
-  "name": "Teclado Mecânico",
-  "sku": "TEC-001",
-  "unitPrice": 250.00,
-  "stockQuantity": 10
-}
-```
-
----
-
-### Clientes
-
-#### 1. Listar clientes
-
-```http
-GET /api/customers
-```
-
-#### 2. Criar cliente
-
-```http
-POST /api/customers
-Content-Type: application/json
-```
-
-**Body:**
-
-```json
-{
-  "name": "João da Silva",
-  "document": "12345678900",
-  "email": "joao@example.com"
-}
-```
-
----
-
-### Pedidos
-
-#### Criar pedido confirmado
-
-```http
-POST /api/orders
-Content-Type: application/json
-```
-
-**Body:**
-
-```json
-{
-  "customerId": 1,
-  "items": [
-    { "productId": 1, "quantity": 2 },
-    { "productId": 2, "quantity": 1 }
-  ]
-}
-```
-
-**Comportamento do backend:**
-
-1. Busca o **cliente** pelo `customerId`
-2. Para cada item:
-
-   * Busca o **produto**
-   * Verifica se há **estoque suficiente**
-   * Baixa o estoque do produto
-   * Cria o **OrderItem** com:
-
-     * `unitPrice` = preço atual do produto
-     * `totalPrice` = `unitPrice * quantity`
-3. Soma o **total** do pedido
-4. Define `status = CONFIRMED`
-5. Salva o **Order** (com seus `OrderItem`s) no banco
-
-**Exemplo de resposta (resumido):**
-
-```json
-{
-  "id": 4,
-  "createdAt": "2026-01-27T20:26:43.347899",
+  "id": 1,
+  "createdAt": "2026-05-11T10:30:00.123",
   "status": "CONFIRMED",
   "totalAmount": 750.00,
-  "customer": {
-    "id": 1,
-    "name": "João da Silva",
-    "document": "12345678900",
-    "email": "joao@example.com"
-  },
+  "customer": { "id": 1, "name": "Joana Silva", "email": "joana@example.com", "document": "12345678900" },
   "orderItems": [
-    {
-      "id": 1,
-      "product": {
-        "id": 1,
-        "name": "Teclado Mecânico",
-        "sku": "TEC-001"
-      },
-      "quantity": 2,
-      "unitPrice": 250.00,
-      "totalPrice": 500.00
-    }
+    { "id": 1, "product": { "id": 1, "name": "Teclado Mecânico", "sku": "TEC-001" }, "quantity": 2, "unitPrice": 250.00, "totalPrice": 500.00 },
+    { "id": 2, "product": { "id": 2, "name": "Mouse",            "sku": "MOU-001" }, "quantity": 1, "unitPrice": 250.00, "totalPrice": 250.00 }
   ]
 }
 ```
 
----
+Buscar por ID:
 
-## 🧮 Fluxo interno da criação de pedido (OrderService)
-
-A lógica principal está em `OrderService#createConfirmedOrder`:
-
-1. **Recebe** `customerId` e a lista de itens (`productId`, `quantity`)
-2. **Carrega o cliente** do banco
-3. **Instancia o Order**:
-
-   * `customer`
-   * `createdAt = now()`
-   * `status = CONFIRMED`
-   * `totalAmount = 0`
-4. Para cada item:
-
-   * **Carrega o Product**
-   * **Valida estoque** (`stockQuantity >= quantity`)
-   * **Atualiza estoque** (`stockQuantity -= quantity`)
-   * Cria `OrderItem` com:
-
-     * `order`
-     * `product`
-     * `quantity`
-     * `unitPrice` (do produto)
-     * `totalPrice = unitPrice * quantity`
-   * Adiciona o `OrderItem` à lista do `Order`
-   * Soma no `totalAmount`
-5. **Salva** o `Order` usando `orderRepository.save(order)`
-6. Retorna o pedido persistido
-
-Isso mostra na prática:
-
-* Uso de **service** para concentrar regra de negócio
-* Uso de **repositories** apenas para acesso a dados
-* Uso de **entidades JPA** com relacionamentos
-
----
-
-## 🧱 Estrutura de pacotes
-
-Pacotes principais:
-
-```text
-src/main/java/com/vitorcamprubi/OMS_Lite
-├── api
-│   ├── PingController
-│   ├── ProductController
-│   ├── CustomerController
-│   └── OrderController
-│
-├── domain
-│   ├── Customer
-│   ├── Product
-│   ├── Order
-│   ├── OrderItem
-│   └── OrderStatus (enum)
-│
-├── repository
-│   ├── CustomerRepository
-│   ├── ProductRepository
-│   └── OrderRepository
-│
-└── service
-    └── OrderService
+```bash
+curl http://localhost:8080/api/orders/1
 ```
 
----
+### Erros
 
-## 🔮 Próximos passos / ideias de evolução
+Todos os erros voltam no formato `ApiError`:
 
-Algumas ideias para futuras melhorias:
-
-* [ ] Paginação e filtros em listagens (`/products`, `/customers`, `/orders`)
-* [ ] Validações mais completas com Bean Validation (ex.: `@Email`, `@NotBlank`, etc.)
-* [ ] Endpoint para cancelar pedido (`CANCELLED`) com regra de devolução de estoque
-* [ ] Autenticação e autorização (Spring Security / JWT)
-* [ ] Documentação da API com **OpenAPI/Swagger**
-* [ ] Testes automatizados (unitários e de integração)
-
----
-
-## 👤 Autor
-
-**Vitor Camprubi**
-🔗 GitHub: [@VitorCamprubi](https://github.com/VitorCamprubi)
-
-Projeto criado para estudo e portfólio como desenvolvedor **Java Backend**.
-
----
-
-## 📄 Licença
-
-Projeto de estudo, sem licença formal definida ainda.
-Sinta-se à vontade para clonar e brincar com o código.
-
+```json
+{
+  "status": 409,
+  "error": "Conflict",
+  "message": "Estoque insuficiente para o produto id=1 (solicitado=5, disponível=2)",
+  "path": "/api/orders",
+  "violations": null,
+  "timestamp": "2026-05-11T13:30:00Z"
+}
 ```
-::contentReference[oaicite:0]{index=0}
-```
+
+| Situação                                  | Status |
+|-------------------------------------------|--------|
+| Payload inválido (`@Valid` falhou)        | 400    |
+| Cliente / produto / pedido não encontrado | 404    |
+| Estoque insuficiente, SKU/e-mail duplicado | 409    |
+| Erro inesperado                           | 500    |
+
+---
+
+## CI
+
+`.github/workflows/ci.yml` roda em todo push e PR contra `main`/`master`,
+executando `mvn -B -ntp verify` com cache do Maven via
+`actions/setup-java`. Reports de Surefire/Failsafe são enviados como
+artifacts em caso de falha.
+
+---
+
+## Licença
+
+Projeto de estudo. Use à vontade.
