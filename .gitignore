@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Replay helper (scratch dir used by replay_commits.ps1, not source) ###
+.replay/
+replay_commits.ps1
