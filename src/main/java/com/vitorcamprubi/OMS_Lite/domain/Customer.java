@@ -14,12 +14,12 @@ public class Customer {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private long id;
+    private Long id;
 
-    @Column(nullable = false)
+    @Column(nullable = false, length = 255)
     private String name;
 
-    @Column(unique = true)
+    @Column(unique = true, length = 255)
     private String email;
 
     @Column(unique = true, length = 20)
