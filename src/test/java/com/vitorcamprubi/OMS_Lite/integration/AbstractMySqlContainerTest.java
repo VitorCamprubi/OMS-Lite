@@ -31,15 +31,27 @@ public abstract class AbstractMySqlContainerTest {
         MYSQL.start();
     }
 
+    /**
+     * Returns the container JDBC URL with TLS disabled. The MySQL 8 image generates
+     * a self-signed certificate on startup, and on machines with even a few seconds
+     * of clock skew the JDBC driver may reject it with CertificateNotYetValidException.
+     * We don't need TLS to talk to a throw-away container on localhost.
+     */
+    private static String jdbcUrlNoSsl() {
+        String url = MYSQL.getJdbcUrl();
+        String sep = url.contains("?") ? "&" : "?";
+        return url + sep + "useSSL=false&allowPublicKeyRetrieval=true";
+    }
+
     @DynamicPropertySource
     static void registerMySqlProps(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+        registry.add("spring.datasource.url", AbstractMySqlContainerTest::jdbcUrlNoSsl);
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
         registry.add("spring.datasource.driver-class-name", MYSQL::getDriverClassName);
         // Force a clean state for Flyway between test classes
         registry.add("spring.flyway.clean-disabled", () -> "false");
-        registry.add("spring.flyway.url", MYSQL::getJdbcUrl);
+        registry.add("spring.flyway.url", AbstractMySqlContainerTest::jdbcUrlNoSsl);
         registry.add("spring.flyway.user", MYSQL::getUsername);
         registry.add("spring.flyway.password", MYSQL::getPassword);
     }
