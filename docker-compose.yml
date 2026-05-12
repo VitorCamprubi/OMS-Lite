@@ -13,7 +13,9 @@ services:
       MYSQL_USER: ${MYSQL_USER:-oms}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-omspw}
     ports:
-      - "3306:3306"
+      # Host port 3307 to avoid clashing with a MySQL installed on the host.
+      # Inside the compose network the app still talks to mysql:3306.
+      - "${MYSQL_HOST_PORT:-3307}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:

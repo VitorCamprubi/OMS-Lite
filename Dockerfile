@@ -4,9 +4,12 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /workspace
 
-# Copy pom first to leverage Docker layer cache for dependencies
+# Copy pom first so the dependency-resolve layer is cached while pom.xml is unchanged.
+# We deliberately skip `dependency:go-offline` — it tries to resolve every plugin
+# (including reporting/provisioning plugins it never actually needs) and can hang
+# or fail in CI environments. `mvn package` will resolve and cache deps on its own.
 COPY pom.xml .
-RUN mvn -B -ntp dependency:go-offline
+RUN mvn -B -ntp -DskipTests dependency:resolve
 
 COPY src ./src
 RUN mvn -B -ntp package -DskipTests
