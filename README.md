@@ -1,6 +1,11 @@
 # OMS-Lite
 
-Mini **Order Management System** em Java + Spring Boot 4. Expõe uma API REST
+[![CI](https://github.com/VitorCamprubi/OMS-Lite/actions/workflows/ci.yml/badge.svg)](https://github.com/VitorCamprubi/OMS-Lite/actions/workflows/ci.yml)
+[![Java 21](https://img.shields.io/badge/Java-21-orange?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.0-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+Mini **Order Management System** em Java + Spring Boot. Expõe uma API REST
 para cadastrar clientes e produtos e criar pedidos com baixa de estoque
 transacional. Projeto de portfólio focado em mostrar uma stack backend Java
 realista — não é production-ready, mas as práticas (migrations versionadas,
@@ -30,8 +35,8 @@ pagamento, cancelamento, expedição, etc. — escopo intencionalmente curto.
 | Camada            | Tecnologia                                    |
 |-------------------|-----------------------------------------------|
 | Linguagem         | Java 21                                       |
-| Framework         | Spring Boot 4.0.1 (`spring-boot-starter-webmvc`) |
-| Persistência      | Spring Data JPA / Hibernate 7                 |
+| Framework         | Spring Boot 3.5.0 (`spring-boot-starter-web`) |
+| Persistência      | Spring Data JPA / Hibernate 6                 |
 | Banco             | MySQL 8                                       |
 | Migrations        | Flyway (`flyway-core` + `flyway-mysql`)       |
 | Validação         | Bean Validation (Jakarta)                     |
@@ -362,6 +367,44 @@ artifacts em caso de falha.
 
 ---
 
+## Limitations / Out of scope
+
+Fora do escopo desta versão, deliberadamente, para manter o projeto focado
+no fluxo central de pedido/estoque. Cada item abaixo é uma decisão
+consciente — não um esquecimento — e tem uma direção clara de
+implementação caso seja exigido.
+
+- **Sem `UPDATE`/`DELETE` em recursos.** Clientes, produtos e pedidos são
+  append-only. Adição natural: `PUT /api/{recurso}/{id}` para edição e
+  soft-delete via coluna `deleted_at` + filtro padrão em queries.
+- **Sem paginação nos listings.** `GET /api/customers` e
+  `GET /api/products` retornam a tabela inteira. Em produção viraria
+  `Pageable` + `Page<T>` com `?page=0&size=20&sort=...`.
+- **Sem autenticação ou autorização.** Todos os endpoints são públicos.
+  A adição natural seria Spring Security com JWT para autenticação
+  stateless, e papéis (`ROLE_ADMIN`, `ROLE_CUSTOMER`) para autorização
+  por endpoint.
+- **Sem ciclo de vida de pedido.** Pedidos nascem como "confirmado" e
+  ficam lá. Cancelar exigiria reverter estoque com lock otimista em
+  `Product.stock` (campo `@Version`) para evitar lost-update sob
+  concorrência. Outros estados (`SHIPPED`, `DELIVERED`) implicariam
+  uma máquina de estados explícita.
+- **Sem idempotência em `POST /api/orders`.** Um cliente que reenviar a
+  mesma requisição por timeout cria dois pedidos. Solução típica:
+  header `Idempotency-Key` + tabela `processed_requests`.
+- **Sem Spring Actuator.** `/api/ping` cobre o health-check do
+  `docker-compose`, mas a versão de produção exporia `/actuator/health`,
+  `/actuator/info` e métricas Prometheus em `/actuator/prometheus`.
+- **Sem observabilidade estruturada.** Logs são texto puro do Logback
+  padrão. Em produção: logs JSON, `traceId`/`spanId` injetados via
+  Micrometer Tracing, e exportador OTLP para um backend (Tempo, Jaeger).
+- **Sem eventos de domínio.** A baixa de estoque acontece in-process no
+  mesmo `@Transactional` da criação do pedido. Numa arquitetura
+  desacoplada, viraria um evento `OrderConfirmed` publicado via
+  transactional outbox.
+
+---
+
 ## Licença
 
-Projeto de estudo. Use à vontade.
+Distribuído sob a licença MIT. Veja [`LICENSE`](LICENSE) para detalhes.
